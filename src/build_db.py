@@ -3,7 +3,7 @@
 =========================================================
 盘后可用，300只约2分钟。
 """
-import requests, sqlite3, json, time, random, os
+import requests, sqlite3, json, time, random, os, pandas as pd
 from config import STOCK_POOL, DATA_DIR, DB_PATH, START_DATE, END_DATE
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -111,46 +111,38 @@ for i, (code, name) in enumerate(STOCK_POOL, 1):
     time.sleep(0.2 + random.uniform(0, 0.2))
 
 # ═══════════════════════════════════════════════════════
-# 第2步：从 OHLCV 计算 pct_change / change / amplitude / turnover
+# 第2步：从 OHLCV 计算衍生列（pandas向量化，按股分组一步到位）
 # ═══════════════════════════════════════════════════════
 print("\n补全计算列 (pct_change / change / amplitude / turnover)...")
-cur = conn.execute("SELECT stock_code, trade_date, open, high, low, close FROM daily_price ORDER BY stock_code, trade_date")
-rows_all = cur.fetchall()
 
-from itertools import groupby
-updated = 0
-for code, group in groupby(rows_all, key=lambda r: r[0]):
-    prev_close = None
-    batch = []
-    for row in group:
-        _, date, op, hi, lo, cl = row
-        if prev_close is not None and prev_close != 0:
-            batch.append((cl / prev_close - 1, cl - prev_close, (hi - lo) / prev_close, code, date))
-        prev_close = cl
-        if len(batch) >= 500:
-            conn.executemany(
-                "UPDATE daily_price SET pct_change=?, change=?, amplitude=? WHERE stock_code=? AND trade_date=?",
-                batch)
-            updated += len(batch)
-            batch.clear()
-    if batch:
+df_all = pd.read_sql(
+    "SELECT stock_code, trade_date, open, high, low, close, volume FROM daily_price ORDER BY stock_code, trade_date",
+    conn)
+
+gp = df_all.groupby("stock_code")
+df_all["pct_change"] = gp["close"].pct_change()
+df_all["change"]     = gp["close"].diff()
+df_all["amplitude"]  = (gp["high"] - gp["low"]) / gp["close"].shift(1)
+
+# turnover = volume / total_shares × 100
+ts_df = pd.read_sql("SELECT stock_code, total_shares FROM stock_info", conn)
+ts_map = dict(zip(ts_df["stock_code"], ts_df["total_shares"]))
+df_all["turnover"] = df_all.apply(
+    lambda r: r["volume"] / ts_map[r["stock_code"]] * 100
+    if ts_map.get(r["stock_code"]) and ts_map[r["stock_code"]] > 0 and r["volume"]
+    else None, axis=1)
+
+# 写回：只更新NULL列，已有值不动
+for col in ["pct_change", "change", "amplitude", "turnover"]:
+    null_mask = df_all[col].notna()
+    if null_mask.sum() == 0:
+        continue
+    rows = [(df_all.at[i, col], df_all.at[i, "stock_code"], df_all.at[i, "trade_date"])
+            for i in df_all[null_mask].index]
+    for j in range(0, len(rows), 500):
         conn.executemany(
-            "UPDATE daily_price SET pct_change=?, change=?, amplitude=? WHERE stock_code=? AND trade_date=?",
-            batch)
-        updated += len(batch)
-conn.commit()
-
-# ── 计算 turnover = volume / total_shares（交易所定义，非估算）──
-print("补全 turnover (volume / total_shares)...")
-ts_map = {r[0]: r[1] for r in conn.execute("SELECT stock_code, total_shares FROM stock_info")}
-cur = conn.execute("SELECT stock_code, trade_date, volume FROM daily_price WHERE turnover IS NULL")
-rows = []
-for code, date, vol in cur:
-    ts = ts_map.get(code)
-    if ts and ts > 0 and vol:
-        rows.append((vol / ts * 100, code, date))
-for i in range(0, len(rows), 500):
-    conn.executemany("UPDATE daily_price SET turnover=? WHERE stock_code=? AND trade_date=?", rows[i:i+500])
+            f"UPDATE daily_price SET {col}=? WHERE stock_code=? AND trade_date=?",
+            rows[j:j+500])
 conn.commit()
 
 # ═══════════════════════════════════════════════════════

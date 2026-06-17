@@ -1,27 +1,39 @@
-"""从 MCP get_history_kline 输出文件中提取 amount + turnover → 补全 daily_price"""
-import json, sqlite3, os, glob
+"""从MCP kline输出文件补全amount/turnover → daily_price（个人工具，依赖本地MCP缓存）
+===============================================================================
+他人clone不需要运行此脚本。build_db.py 已自动计算 turnover = volume/total_shares。
+此脚本仅用于：从历史MCP kline调用中提取真实的amount（成交额）。
+用法: python fill_from_mcp.py [MCP输出目录路径]
+"""
+import json, sqlite3, os, glob, sys
 from config import DB_PATH
 
 conn = sqlite3.connect(DB_PATH)
 
-mcp_dir = os.path.expanduser(
-    r"~/.claude/projects/C--Users-14603-Desktop-for-claude/*/tool-results"
-)
-files = sorted(glob.glob(os.path.join(mcp_dir, "mcp-stock-sdk-get_history_kline-*.txt")),
-               key=os.path.getmtime, reverse=True)
+if len(sys.argv) > 1:
+    mcp_dir = sys.argv[1]
+else:
+    mcp_dir = os.environ.get(
+        "MCP_OUTPUT_DIR",
+        os.path.expanduser(r"~/.claude/projects/C--Users-14603-Desktop-for-claude/*/tool-results")
+    )
 
-print(f"找到 {len(files)} 个 kline 输出文件")
+files = sorted(glob.glob(os.path.join(mcp_dir, "mcp-stock-sdk-get_history_kline-*.txt")))
+files = [f for f in files if os.path.getmtime(f) > 0]
+
+if not files:
+    print("[!] 未找到MCP kline输出文件。")
+    print(f"  提示: turnover已由build_db.py从volume/total_shares计算，amount不影响任何因子。")
+    sys.exit(0)
+
+print(f"找到 {len(files)} 个kline文件")
 updated = 0
 for fp in files:
-    if "get_history_kline" not in fp:
-        continue
     try:
         with open(fp, "r", encoding="utf-8") as f:
             raw = json.load(f)
-    except:
+    except Exception:
         continue
 
-    # 格式：list of {date, open, close, ..., code, amount, turnoverRate}
     if not isinstance(raw, list):
         continue
 
@@ -31,25 +43,15 @@ for fp in files:
         date = k.get("date", "")
         amt = k.get("amount")
         turnover = k.get("turnoverRate")
-        if code and date and (amt is not None or turnover is not None):
+        if code and date and turnover is not None:
             batch.append((amt, turnover, code, date))
 
     if batch:
         conn.executemany(
             "UPDATE daily_price SET amount=?, turnover=? WHERE stock_code=? AND trade_date=?",
-            [(a, t, c, d) for a, t, c, d in batch])
+            batch)
         conn.commit()
         updated += len(batch)
 
 print(f"共补全 {updated} 条 → {DB_PATH}")
-
-# 统计覆盖
-cur = conn.execute("SELECT COUNT(*) FROM daily_price")
-total = cur.fetchone()[0]
-cur = conn.execute("SELECT COUNT(*) FROM daily_price WHERE amount IS NOT NULL")
-amt = cur.fetchone()[0]
-cur = conn.execute("SELECT COUNT(*) FROM daily_price WHERE turnover IS NOT NULL")
-turn = cur.fetchone()[0]
-print(f"amount:  {amt}/{total} ({amt/total*100:.0f}%)")
-print(f"turnover: {turn}/{total} ({turn/total*100:.0f}%)")
 conn.close()

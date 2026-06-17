@@ -1,5 +1,11 @@
-"""从 MCP get_a_share_quotes 输出文件中提取总股本/PE/PB → SQLite"""
-import json, sqlite3, os, glob
+"""从MCP输出文件提取stock_info → SQLite（个人工具，依赖本地MCP缓存）
+=================================================================
+他人clone项目不需要运行此脚本。stock_info已通过fundamentals.py（东方财富API直连）写入。
+此脚本仅用于：当fundamentals.py的API不可用时，从Claude MCP的本地输出文件兜底。
+用法: python extract_mcp.py [MCP输出目录路径]
+      默认搜索 ~/.claude/projects/*/tool-results/
+"""
+import json, sqlite3, os, glob, sys
 from config import DB_PATH, DATA_DIR
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -18,22 +24,33 @@ conn.execute("""
     )
 """)
 
-# 找所有 MCP 输出文件
-mcp_dir = os.path.expanduser(
-    r"~/.claude/projects/C--Users-14603-Desktop-for-claude/*/tool-results"
-)
-files = glob.glob(os.path.join(mcp_dir, "mcp-stock-sdk-get_a_share_quotes-*.txt"))
-files = sorted(files, key=os.path.getmtime, reverse=True)
-print(f"找到 {len(files)} 个 MCP 输出文件")
+# MCP输出目录：命令行参数 > 环境变量 > 默认路径
+if len(sys.argv) > 1:
+    mcp_dir = sys.argv[1]
+else:
+    mcp_dir = os.environ.get(
+        "MCP_OUTPUT_DIR",
+        os.path.expanduser(r"~/.claude/projects/C--Users-14603-Desktop-for-claude/*/tool-results")
+    )
 
+files = sorted(glob.glob(os.path.join(mcp_dir, "mcp-stock-sdk-get_a_share_quotes-*.txt")))
+files = [f for f in files if os.path.getmtime(f) > 0]  # 过滤无效文件
+
+if not files:
+    print("[!] 未找到MCP输出文件。请确认：")
+    print(f"    1) MCP输出目录正确: {mcp_dir}")
+    print(f"    2) 已运行过 MCP get_a_share_quotes 批量调用")
+    print(f"  提示: 可直接用 fundamentals.py 替代，不依赖MCP。")
+    sys.exit(1)
+
+print(f"找到 {len(files)} 个MCP文件")
+print(f"源目录: {mcp_dir}")
 inserted = 0
 for fp in files:
-    print(f"处理: {os.path.basename(fp)[:60]}...")
     try:
         with open(fp, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as e:
-        print(f"  跳过: {e}")
+    except Exception:
         continue
 
     for item in data:
@@ -57,17 +74,5 @@ for fp in files:
         inserted += 1
 
 conn.commit()
-print(f"\n共写入 {inserted} 条 → {DB_PATH}")
-
-# 覆盖度检查
-with open(os.path.join(DATA_DIR, "csi300_stocks.json"), "r", encoding="utf-8") as f:
-    csi300 = json.load(f)
-target_codes = {s["code"] for s in csi300}
-cur = conn.execute("SELECT stock_code FROM stock_info")
-have_codes = {r[0] for r in cur}
-missing = target_codes - have_codes
-print(f"已覆盖: {len(have_codes & target_codes)}/{len(target_codes)}")
-if missing:
-    print(f"缺失 {len(missing)} 只: {sorted(missing)[:20]}...")
-
+print(f"共写入 {inserted} 条 → {DB_PATH}")
 conn.close()
