@@ -157,7 +157,7 @@ cbar = plt.colorbar(im, shrink=0.8, pad=0.01)
 cbar.set_label('Pearson r')
 plt.tight_layout(); plt.savefig(f'{plot_dir}/04_corr.png', dpi=150, bbox_inches='tight'); plt.close()
 
-print(f"✅ 4张图已保存到 {plot_dir}/")
+print(f"[OK] 4张图已保存到 {plot_dir}/")
 print(f"  01_icir.png         — ICIR全景（全在±0.3以内）")
 print(f"  02_significance.png  — 统计显著≠经济显著")
 print(f"  03_ic_ts.png         — 逐月IC在零轴震荡")

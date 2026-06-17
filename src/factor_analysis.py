@@ -335,7 +335,7 @@ def print_corr_matrix(monthly, factors, label):
     if high_pairs:
         print(f"\n[!] 发现 {len(high_pairs)} 对高相关因子（|r|>{CORR_HIGH_THRESHOLD}）：")
         for fi, fj, v in high_pairs:
-            print(f"   {fi} ↔ {fj}  r={v:+.3f}")
+            print(f"   {fi} <-> {fj}  r={v:+.3f}")
         print("  → 多因子合成时每组只保留 ICIR 更高的那个")
     else:
         print(f"\n[OK] 无明显高相关（|r|>{CORR_HIGH_THRESHOLD}），可全部进入多因子合成。")
