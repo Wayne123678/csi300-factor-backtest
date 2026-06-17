@@ -1,5 +1,5 @@
-data/*.db
-data/*.db-*
+data/*.db-shm
+data/*.db-wal
 __pycache__/
 *.pyc
 .DS_Store
