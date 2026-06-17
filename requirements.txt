@@ -1,3 +1,4 @@
+# Python >= 3.10 (tested on 3.13)
 akshare
 pandas
 numpy
