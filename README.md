@@ -46,21 +46,14 @@
 ## 快速开始
 
 ```bash
-# 1. 沪深300成分股
-python -c "import akshare as ak,json; df=ak.index_stock_cons_csindex('000300'); ..."
+# 一键运行（数据库已在仓库中）
+pip install -r requirements.txt
+python main.py
 
-# 2. 日线（298只，腾讯源）
-python src/build_db.py
-
-# 3. PE/PB历史（300只，东方财富直连）
-python src/build_valuation.py
-
-# 4. 基本面
-python src/fundamentals.py
-
-# 5. 因子计算 + 分析
+# 或分步运行：
 python src/factors.py
 python src/factor_analysis.py
+python src/visualize.py
 ```
 
 ---
